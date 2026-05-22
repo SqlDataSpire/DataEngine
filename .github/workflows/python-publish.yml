@@ -23,7 +23,9 @@ jobs:
         run: pip install flit python-dotenv
 
       - name: Build release distributions
-        run: flit build
+        run: |
+          rm -rf dist/*
+          flit build
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
