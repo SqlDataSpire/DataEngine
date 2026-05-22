@@ -20,7 +20,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install Flit
-        run: pip install flit
+        run: pip install flit python-dotenv
 
       - name: Build release distributions
         run: flit build
