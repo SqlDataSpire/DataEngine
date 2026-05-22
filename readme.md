@@ -11,13 +11,13 @@ Connection strings are stored in a single `database.env` file and loaded at runt
 Requires Python >= 3.10 and an active virtual environment.
 
 ```bash
-pip install git+https://github.com/SqlDataSpire/DataEngine.git
+pip install Python-DataEngine
 ```
 
 To force a reinstall:
 
 ```bash
-pip install --force-reinstall git+https://github.com/SqlDataSpire/DataEngine.git
+pip install --force-reinstall Python-DataEngine
 ```
 
 ### SQL Server prerequisite
