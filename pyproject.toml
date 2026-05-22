@@ -24,5 +24,8 @@ dependencies = [
     "tzdata>=2024.1"
 ]
 
+[tool.flit.module]
+name = "DataEngine"
+
 [project.urls]
 Home = "https://github.com/SqlDataSpire/DataEngine"
