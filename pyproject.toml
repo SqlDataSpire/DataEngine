@@ -5,7 +5,8 @@ build-backend = "flit_core.buildapi"
 [project]
 name = "Python-DataEngine"
 authors = [{name = "tlibs313"}]
-dynamic = ["version", "description", "readme"]
+dynamic = ["version", "description"]
+readme = "readme.md"
 dependencies = [
     "dnspython>=2.6.1",
     "greenlet>=3.0.3",
