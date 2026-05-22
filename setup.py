@@ -3,7 +3,7 @@ from setuptools import setup, find_namespace_packages
 VERSION = "2.2.1"
 DESCRIPTION = "Class Wrapper for sqlalchemy, pandas and mongo"
 LONG_DESCRIPTION = ""
-install_requires = open("requirements.txt").read().strip().split("\n")
+# install_requires = open("requirements.txt").read().strip().split("\n")
 # Setting up
 setup(
     # the name must match the folder name 'verysimplemodule'
