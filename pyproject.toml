@@ -3,7 +3,7 @@ requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "DataEngine"
+name = "Python-DataEngine"
 authors = [{name = "tlibs313"}]
 dynamic = ["version", "description"]
 dependencies = [
