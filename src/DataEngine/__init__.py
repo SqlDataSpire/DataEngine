@@ -1,3 +1,4 @@
+"""An engine for managing SQL data transitions."""
 from . import _version
 import os
 import importlib
