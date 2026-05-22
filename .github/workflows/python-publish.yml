@@ -36,7 +36,7 @@ jobs:
     needs: release-build
     environment:
       name: pypi
-      url: https://pypi.org/p/DataEngine
+      url: https://pypi.org/p/Python-DataEngine
     permissions:
       id-token: write
     steps:
