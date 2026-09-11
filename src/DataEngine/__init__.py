@@ -14,7 +14,9 @@ if "flit" not in sys.modules and "build" not in sys.modules:
     from .postgres import PgConnectionObject
     from .mongo import MongoConnectionObject, MongoResult
 
-__version__ = _version.get_version()
+#__version__ = _version.get_version()
+__version__ = "2.1.2"
+
 alchemyConnections = {}
 alchemyObjects = {}
 
