@@ -145,6 +145,40 @@ pg = DataEngine.alchemyObjects["postgres"]
 df = pg.getTable("SELECT * FROM public.orders WHERE status = 'open'")
 ```
 
+## Direct Connection Access
+
+Both `SqlConnectionObject` and `PgConnectionObject` expose the underlying database connection layers for advanced workflows:
+
+| Attribute | Type | Description |
+| :--- | :--- | :--- |
+| `.connection` | `pyodbc.Connection` / `psycopg2.extensions.connection` | The raw DB-API 2.0 driver connection for low-level cursor operations. |
+| `.engine` | `sqlalchemy.engine.Engine` | The SQLAlchemy Engine instance managing the underlying connection pool. |
+| `.session` | `sqlalchemy.orm.scoping.scoped_session` | A thread-local SQLAlchemy ORM scoped session for transactional and ORM queries. |
+
+### Example
+
+```python
+import DataEngine
+
+DataEngine.initialize()
+db = DataEngine.alchemyObjects["my_connection"]
+
+# 1. Raw DB-API connection
+raw_conn = db.connection
+cursor = raw_conn.cursor()
+
+# 2. SQLAlchemy Engine execution
+with db.engine.connect() as conn:
+    result = conn.execute("SELECT 1")
+
+# 3. SQLAlchemy Scoped Session
+session = db.session()
+try:
+    # Perform ORM operations
+    session.commit()
+finally:
+    db.session.remove()
+```
 ---
 
 ## MongoDB — `MongoConnectionObject`
