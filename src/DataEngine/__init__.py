@@ -1,5 +1,4 @@
 """An engine for managing SQL data transitions."""
-from . import _version
 import os
 import importlib
 import pathlib
@@ -14,8 +13,8 @@ if "flit" not in sys.modules and "build" not in sys.modules:
     from .postgres import PgConnectionObject
     from .mongo import MongoConnectionObject, MongoResult
 
-#__version__ = _version.get_version()
-__version__ = "2.1.2"
+# flit reads this as the package version (pyproject declares it dynamic)
+__version__ = "2.2.0"
 
 alchemyConnections = {}
 alchemyObjects = {}
@@ -62,20 +61,27 @@ def connectionGenerator(connectionList: dict = None):
     if connectionList is None:
         load_dotenv("database.env")
         alchemyConnections = json.loads(os.environ["databases"])
-    connectionList = alchemyConnections
+        connectionList = alchemyConnections
+    # A caller-supplied dict is used as-is and deliberately NOT written to
+    # alchemyConnections — that global is what saveConnectionStrings() persists
+    # to database.env in plaintext, so credentials passed in memory stay in memory.
     for dbs in connectionList.keys():
         server = connectionList[dbs]["server"]
         database = connectionList[dbs]["database"]
-        un = connectionList[dbs]["UN"]
-        pw = connectionList[dbs]["PW"]
-        trusted = connectionList[dbs]["trusted"]
+        # Optional: a document built by hand need not carry keys the auth mode
+        # makes meaningless (UN/PW under Windows auth, trusted under postgres).
+        un = connectionList[dbs].get("UN", "")
+        pw = connectionList[dbs].get("PW", "")
+        trusted = connectionList[dbs].get("trusted", "no")
         _t = connectionList[dbs]["type"]
         if _t == "mssql":
             alchemyObjects[dbs] = SqlConnectionObject(**{"name": dbs, "server": server, "database": database, "UN": un, "PW": pw, "trusted": trusted, } )
-        if _t == "postgres":
+        elif _t == "postgres":
             alchemyObjects[dbs] = PgConnectionObject(**{"name": dbs, "server": server, "database": database, "UN": un, "PW": pw, } )
-        if _t == "mongo":
+        elif _t == "mongo":
             alchemyObjects[dbs] = MongoConnectionObject(**{"name": dbs, "server": server, "database": database, "UN": un, "PW": pw, } )
+        else:
+            raise ValueError(f"connection {dbs!r} has unknown type {_t!r} - expected 'mssql', 'postgres' or 'mongo'")
 
 def saveConnectionStrings():
     cx = str(alchemyConnections).replace("'", '"')
@@ -109,12 +115,20 @@ def connectionStringBuilder():
 
     _svr_type = validate("1=MSSQL | 2=POSTGRES | 3=MONGO?\r\n", ["1", "2", "3"])
     svr_type = ""
-    if _svr_type == "1":
-        svr_type = "mssql"
-    if _svr_type == "2":
-        svr_type = "postgres"
-    if _svr_type == "3":
-        svr_type = "mongo"
+    match _svr_type:
+        case "1":
+            svr_type = "mssql"
+        case "2":
+            svr_type = "postgres"
+        case "3":
+            svr_type = "mongo"
+    
+    #if _svr_type == "1":
+    #    svr_type = "mssql"
+    #if _svr_type == "2":
+    #    svr_type = "postgres"
+    #if _svr_type == "3":
+    #    svr_type = "mongo"
         
     server = notBlank("Server name?\r\n")
     database = notBlank("database name?\r\n")

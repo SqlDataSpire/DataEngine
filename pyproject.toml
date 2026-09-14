@@ -5,6 +5,9 @@ build-backend = "flit_core.buildapi"
 [project]
 name = "Python-DataEngine"
 authors = [{name = "tlibs313"}]
+# 3.10 is a hard floor: match/case in connectionStringBuilder is a SyntaxError
+# below it, and PEP 604 unions (str | None) in mssql raise TypeError at import.
+requires-python = ">=3.10"
 dynamic = ["version", "description"]
 readme = "readme.md"
 dependencies = [
