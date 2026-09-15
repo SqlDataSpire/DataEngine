@@ -14,7 +14,7 @@ if "flit" not in sys.modules and "build" not in sys.modules:
     from .mongo import MongoConnectionObject, MongoResult
 
 # flit reads this as the package version (pyproject declares it dynamic)
-__version__ = "2.2.0"
+__version__ = "2.4.0"
 
 alchemyConnections = {}
 alchemyObjects = {}
