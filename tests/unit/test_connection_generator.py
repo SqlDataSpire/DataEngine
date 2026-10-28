@@ -105,20 +105,40 @@ class TestConnectionGeneratorTypeDispatch:
         DataEngine.connectionGenerator({"a": _doc(type="mongo")})
         mock_mongo.assert_called_once()
 
+    def test_mysql_builds_a_mysql_connection_object(self, registries, mocker):
+        mock_mysql = mocker.patch("DataEngine.MysqlConnectionObject")
+        DataEngine.connectionGenerator({"a": _doc(type="mysql")})
+        mock_mysql.assert_called_once()
+
+    def test_mariadb_builds_a_mysql_connection_object(self, registries, mocker):
+        mock_mysql = mocker.patch("DataEngine.MysqlConnectionObject")
+        DataEngine.connectionGenerator({"a": _doc(type="mariadb")})
+        mock_mysql.assert_called_once()
+
+    def test_oracle_builds_an_oracle_connection_object(self, registries, mocker):
+        mock_oracle = mocker.patch("DataEngine.OracleConnectionObject")
+        DataEngine.connectionGenerator({"a": _doc(type="oracle")})
+        mock_oracle.assert_called_once()
+
+    def test_generic_builds_a_generic_connection_object(self, registries, mocker):
+        mock_generic = mocker.patch("DataEngine.GenericConnectionObject")
+        DataEngine.connectionGenerator({"custom": {"type": "generic", "connection": "sqlite:///:memory:"}})
+        mock_generic.assert_called_once_with(name="custom", connection="sqlite:///:memory:", engine_kwargs={})
+
     def test_unrecognised_type_raises(self, registries, mock_sql_object):
         # Silently building nothing is the same class of failure as building the
         # wrong thing: the caller gets no connection and no explanation.
         with pytest.raises(ValueError):
-            DataEngine.connectionGenerator({"legacy": _doc(type="oracle")})
+            DataEngine.connectionGenerator({"legacy": _doc(type="unsupported_db")})
 
     def test_unrecognised_type_error_names_the_type_and_the_connection(
         self, registries, mock_sql_object
     ):
-        with pytest.raises(ValueError, match="oracle"):
-            DataEngine.connectionGenerator({"legacy": _doc(type="oracle")})
+        with pytest.raises(ValueError, match="unsupported_db"):
+            DataEngine.connectionGenerator({"legacy": _doc(type="unsupported_db")})
 
         with pytest.raises(ValueError, match="legacy"):
-            DataEngine.connectionGenerator({"legacy": _doc(type="oracle")})
+            DataEngine.connectionGenerator({"legacy": _doc(type="unsupported_db")})
 
 
 # ---------------------------------------------------------------------------
@@ -198,3 +218,61 @@ class TestConnectionGeneratorFromEnvFile:
         DataEngine.connectionGenerator()
 
         assert "main" in DataEngine.alchemyConnections
+
+
+# ---------------------------------------------------------------------------
+# Password resolution — file:, ${ENV}, prompt, and literal
+# ---------------------------------------------------------------------------
+
+class TestPasswordResolution:
+    def test_file_reference_reads_from_disk(self, registries, mock_sql_object, tmp_path):
+        pwd_file = tmp_path / "db.pwd"
+        pwd_file.write_text("s3cret_from_file\n")
+
+        DataEngine.connectionGenerator(
+            {"app": _doc(trusted="no", UN="user", PW=f"file:{pwd_file}")}
+        )
+
+        assert mock_sql_object.call_args.kwargs["PW"] == "s3cret_from_file"
+
+    def test_missing_file_reference_raises_file_not_found(self, registries, mock_sql_object, tmp_path):
+        missing = tmp_path / "nonexistent.pwd"
+        with pytest.raises(FileNotFoundError, match="Password file not found"):
+            DataEngine.connectionGenerator(
+                {"app": _doc(trusted="no", UN="user", PW=f"file:{missing}")}
+            )
+
+    def test_env_var_reference_reads_from_environ(self, registries, mock_sql_object, monkeypatch):
+        monkeypatch.setenv("APP_DB_PASSWORD", "env_secret_123")
+
+        DataEngine.connectionGenerator(
+            {"app": _doc(trusted="no", UN="user", PW="${APP_DB_PASSWORD}")}
+        )
+
+        assert mock_sql_object.call_args.kwargs["PW"] == "env_secret_123"
+
+    def test_prompt_with_interactive_tty_calls_getpass(self, registries, mock_sql_object, mocker):
+        mocker.patch("sys.stdin.isatty", return_value=True)
+        mock_getpass = mocker.patch("getpass.getpass", return_value="typed_secret")
+
+        DataEngine.connectionGenerator(
+            {"app": _doc(trusted="no", UN="admin", PW="prompt")}
+        )
+
+        mock_getpass.assert_called_once()
+        assert mock_sql_object.call_args.kwargs["PW"] == "typed_secret"
+
+    def test_prompt_without_tty_raises_runtime_error(self, registries, mock_sql_object, mocker):
+        mocker.patch("sys.stdin.isatty", return_value=False)
+
+        with pytest.raises(RuntimeError, match="no interactive terminal"):
+            DataEngine.connectionGenerator(
+                {"app": _doc(trusted="no", UN="admin", PW="prompt")}
+            )
+
+    def test_literal_password_preserved(self, registries, mock_sql_object):
+        DataEngine.connectionGenerator(
+            {"app": _doc(trusted="no", UN="user", PW="regular_password")}
+        )
+
+        assert mock_sql_object.call_args.kwargs["PW"] == "regular_password"

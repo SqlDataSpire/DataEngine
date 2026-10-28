@@ -57,8 +57,10 @@ def _build_odbc_string(server: str, database: str, UN: str | None = None, PW: st
 
     return base + "Authentication=ActiveDirectoryIntegrated;"
 
+from ..base import BaseRdbmsConnectionObject
 
-class SqlConnectionObject:
+
+class SqlConnectionObject(BaseRdbmsConnectionObject):
     def __init__(self, **kwargs):
         name     = kwargs["name"]
         server   = kwargs["server"]
@@ -72,81 +74,17 @@ class SqlConnectionObject:
         odbc = _build_odbc_string(server, database, UN=un, PW=pw, trusted=trusted)
         conx = f"mssql+pyodbc:///?odbc_connect={urllib.parse.quote_plus(odbc)}"
 
-        self.name       = name
-        self.connection = conx
-        self.engine     = create_engine(conx, fast_executemany=True)
-        self.session    = scoped_session(sessionmaker(bind=self.engine))
+        engine  = create_engine(conx, fast_executemany=True)
+        session = scoped_session(sessionmaker(bind=engine))
+        super().__init__(name, conx, engine=engine, session=session)
 
-    def __repr__(self):
-        return f"SqlConnectionObject:{self.name} = {self.engine.url.host}.{self.engine.url.database}"
-
-    def getConnection(self):
-        return self.engine.connect()
-
-    def getStreamingConnection(self):
-        return self.engine.connect().execution_options(stream_results=True)
-
-    def executeProcedure(self, procedure_name, streaming=False):
-        con = self.getConnection if streaming == False else self.getStreamingConnection
-        with con() as tconn:
-            try:
-                tconn.execute(text(f"set nocount on; exec {procedure_name};"))
-                tconn.commit()
-            except Exception as tctE:
-                tconn.rollback()
-                raise Exception(f"executeProcedure(): {tctE}")
-
-    def truncateTable(self, schema, name):
-        with self.getConnection() as tconn:
-            try:
-                tconn.execute(text(f"truncate table {schema}.{name};"))
-                tconn.commit()
-            except Exception as tctE:
-                tconn.rollback()
-                raise Exception(f"executeProcedure(): {tctE}")
-                return
+    def _format_procedure_sql(self, procedure_name: str) -> str:
+        return f"set nocount on; exec {procedure_name};"
 
     def interop(self, insert_command) -> int:
-        # insert_command = insert_command + "; select scope_identity() as new_id;"
-        # id = -1
         con = self.engine.raw_connection()
         cur = con.cursor()
         cur.execute(insert_command)
         newid = cur.execute("select scope_identity() as new_id").fetchone()
-        # cur.nextset()
-        # id = cur.fetchone()
         con.commit()
         return int(newid[0])
-
-    def query(self, query_text):
-        statement = text(query_text)
-        with self.getConnection() as con:
-            results = con.execute(statement).fetchall()
-            con.commit()
-        return results
-
-    def execute(self, non_result_query):
-        statement = text(non_result_query)
-        with self.getConnection() as con:
-            con.execute(statement)
-            con.commit()
-        # return results
-
-    def queryStream(self, query_text):
-        statement = text(query_text)
-        with self.getStreamingConnection() as con:
-            for item in con.execute(statement).fetchall():
-                yield item
-            con.commit()
-
-    def getTable(self, query_text) -> pd.DataFrame:
-        statement = text(query_text)
-        with self.getConnection() as con:
-            df = pd.read_sql(statement, con)
-        return df
-
-    def chunkTable(self, query_text, chunksize):
-        statement = text(query_text)
-        with self.getStreamingConnection() as con:
-            for chunk in pd.read_sql(statement, con, chunksize=chunksize):
-                yield chunk

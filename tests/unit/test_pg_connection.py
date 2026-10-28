@@ -35,3 +35,11 @@ class TestPgConnectionObject:
     def test_name_is_stored(self, mocker):
         obj = self._make(mocker, name="analytics")
         assert obj.name == "analytics"
+
+    def test_trusted_uses_gssapi_kerberos(self, mocker):
+        obj = self._make(mocker, trusted="yes", UN="", PW="")
+        assert obj.connection.startswith("postgresql+psycopg2://@pgserver/pgdb?gssencmode=prefer")
+
+    def test_un_without_pw_omits_password(self, mocker):
+        obj = self._make(mocker, trusted=False, UN="app_user", PW="")
+        assert obj.connection == "postgresql+psycopg2://app_user@pgserver/pgdb"

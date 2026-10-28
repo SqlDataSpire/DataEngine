@@ -1,6 +1,8 @@
 # DataEngine
 
-A lightweight Python wrapper around SQLAlchemy, pandas, pyodbc, psycopg2, and pymongo that provides a unified interface for connecting to SQL Server, PostgreSQL, and MongoDB.
+A lightweight Python wrapper around SQLAlchemy, pandas, pyodbc, psycopg2-binary, pymysql, oracledb, and pymongo that provides a unified interface for connecting to SQL Server, PostgreSQL, MySQL, MariaDB, Oracle, and MongoDB.
+
+All relational connections inherit from a shared `BaseRdbmsConnectionObject`, providing identical interfaces for raw connection strings, SQLAlchemy engines, scoped sessions, and pandas DataFrames.
 
 Connection strings are stored in a single `database.env` file and loaded at runtime — no credentials in code.
 
@@ -20,9 +22,11 @@ To force a reinstall:
 pip install --force-reinstall Python-DataEngine
 ```
 
+> 💡 **Cross-Platform Compatibility:** DataEngine uses `psycopg2-binary`, `pymysql`, and `oracledb` (in pure-Python Thin mode), meaning PostgreSQL, MySQL, MariaDB, and Oracle install cleanly on Ubuntu/Linux, macOS, and Windows with **zero C-compiler or client library prerequisites**.
+
 ### SQL Server prerequisite
 
-DataEngine uses pyodbc and requires a Microsoft ODBC driver. Supported drivers in order of preference:
+DataEngine uses pyodbc for SQL Server and requires a Microsoft ODBC driver. Supported drivers in order of preference:
 
 1. ODBC Driver 18 for SQL Server *(recommended)*
 2. ODBC Driver 17 for SQL Server
@@ -50,7 +54,18 @@ rows = db.query("SELECT TOP 10 * FROM dbo.MyTable")
 
 Connections are stored in a file named `database.env` in your working directory. Each entry is a JSON object under the `databases` key.
 
-> ⚠️ **`database.env` is plaintext — it is not encrypted.** Prefer Windows Auth or Azure AD over a stored password, or skip the file entirely and configure connections programmatically. See [Two ways to use DataEngine](#two-ways-to-use-dataengine) below.
+### ⚠️ Security Disclaimer: Database Authentication
+
+**Why are you connecting to a database with a username and password?**
+Modern enterprise environments should use passwordless authentication: Windows Authentication, Azure Active Directory / Managed Identities, or Kerberos. Storing static database passwords in configuration files is an anti-pattern.
+
+**DataEngine will not be responsible for leaked credentials.** If you must use password-based authentication, DataEngine provides safe mechanisms to avoid writing passwords to `database.env`:
+
+1. **Windows Auth / Azure AD (Recommended):** Use `trusted="yes"` for Windows Auth, or pass `UN` alone for Azure AD Interactive SSO.
+2. **Response / Password File (`file:<path>`):** Point to a single-line password file (e.g. `"PW": "file:~/.secrets/pg.pwd"` or Docker secrets `"file:/run/secrets/db_password"`) and protect it with strict OS file permissions (`chmod 600`).
+3. **Runtime Environment Variable (`${VAR}`):** Set `"PW": "${PROD_DB_PASSWORD}"` to resolve passwords from runtime process environment variables.
+4. **Connect-Time Prompt (`prompt`):** Set `"PW": "prompt"` to prompt the user interactively at runtime via masked terminal input (`getpass`).
+5. **Plaintext:** Storing a plaintext password in `database.env` is supported but strongly discouraged; use at your own discretion.
 
 ```
 databases = '{"my_connection": {"type": "mssql", "server": "MYSERVER", "database": "MyDB", "UN": "", "PW": "", "trusted": "yes"}}'
@@ -66,12 +81,14 @@ DataEngine.connectionStringBuilder()
 
 | Field | Description |
 |---|---|
-| `type` | `"mssql"`, `"postgres"`, or `"mongo"` |
+| `type` | `"mssql"`, `"postgres"`, `"mysql"`, `"mariadb"`, `"oracle"`, or `"mongo"` |
 | `server` | Server hostname or IP |
-| `database` | Database name |
+| `database` | Database name (or Oracle service name) |
 | `UN` | Username — leave blank `""` where not needed |
-| `PW` | Password — leave blank `""` where not needed |
+| `PW` | Password reference: `"prompt"`, `"file:<path>"`, `"${ENV_VAR}"`, or literal password |
 | `trusted` | `"yes"` for Windows Authentication (SQL Server only), `"no"` otherwise |
+| `port` | Optional: Port number (defaults: MSSQL 1433, Postgres 5432, MySQL/MariaDB 3306, Oracle 1521) |
+| `service_name` | Optional: Oracle service name (falls back to `database` if omitted) |
 
 ---
 
@@ -115,12 +132,12 @@ Keep `database.env` out of source control (`*.env` is already in this repo's `.g
 
 ### Programmatic — the host program owns the credentials
 
-An interactive or self-configuring program does not need `database.env`. `SqlConnectionObject`, `PgConnectionObject`, and `MongoConnectionObject` are exported at package level and can be constructed directly, so a Typer CLI, a web service, or a notebook can resolve a credential however it likes — a prompt, a key vault, a platform secret — and hand it in at call time. Nothing touches disk.
+An interactive or self-configuring program does not need `database.env`. `SqlConnectionObject`, `PgConnectionObject`, `MysqlConnectionObject`, `OracleConnectionObject`, `MongoConnectionObject`, and `BaseRdbmsConnectionObject` are exported at package level and can be constructed directly, so a Typer CLI, a web service, or a notebook can resolve a credential however it likes — a prompt, a key vault, a platform secret — and hand it in at call time. Nothing touches disk.
 
 ```python
 import typer
 import DataEngine
-from DataEngine import SqlConnectionObject
+from DataEngine import SqlConnectionObject, MysqlConnectionObject, OracleConnectionObject
 
 def main(server: str, database: str, username: str,
          password: str = typer.Option(..., prompt=True, hide_input=True)):
@@ -206,11 +223,11 @@ new_id = sql.interop("INSERT INTO dbo.Log (message) VALUES ('started')")
 
 ## PostgreSQL — `PgConnectionObject`
 
-Connects via psycopg2. Always requires `UN` and `PW`.
+Connects via psycopg2-binary. Always requires `UN` and `PW`.
 
 ### Methods
 
-The same interface as `SqlConnectionObject`: `query`, `getTable`, `chunkTable`, `queryStream`, `execute`, `executeProcedure`, `truncateTable`.
+The unified interface provided by `BaseRdbmsConnectionObject`: `query`, `getTable`, `chunkTable`, `queryStream`, `execute`, `executeProcedure`, `truncateTable`.
 
 ### Example
 
@@ -223,13 +240,83 @@ pg = DataEngine.alchemyObjects["postgres"]
 df = pg.getTable("SELECT * FROM public.orders WHERE status = 'open'")
 ```
 
+---
+
+## MySQL & MariaDB — `MysqlConnectionObject`
+
+Connects via the pure-Python `pymysql` driver. Supports both MySQL and MariaDB with zero client-library dependencies.
+
+### Example
+
+```python
+import DataEngine
+
+DataEngine.initialize()
+mysql = DataEngine.alchemyObjects["mysql_db"]
+
+df = mysql.getTable("SELECT * FROM inventory WHERE stock < 10")
+```
+
+---
+
+## Oracle — `OracleConnectionObject`
+
+Connects via `python-oracledb` in Thin mode (pure Python networking directly to the Oracle listener — no Oracle Instant Client needed).
+
+### Example
+
+```python
+import DataEngine
+
+DataEngine.initialize()
+ora = DataEngine.alchemyObjects["oracle_db"]
+
+df = ora.getTable("SELECT * FROM hr.employees WHERE department_id = 10")
+```
+
+---
+
+## Custom & Other Databases — `GenericConnectionObject`
+
+For use cases that require custom parameters, specialized cloud data warehouses (Snowflake, Databricks, Redshift, ClickHouse), embedded databases (SQLite, DuckDB), or connection strings with custom SSL/mTLS certificates, DataEngine exposes `GenericConnectionObject`.
+
+Pass the complete SQLAlchemy connection URI directly, and `DataEngine` provides the full 3-pillar interface (`.connection`, `.engine`, `.session`) and all pandas helpers (`getTable()`, `chunkTable()`, `query()`, `execute()`).
+
+### In `database.env`:
+```json
+{
+  "warehouse": {
+    "type": "generic",
+    "connection": "snowflake://user:pass@account/db/schema?warehouse=wh"
+  },
+  "local_sqlite": {
+    "type": "generic",
+    "connection": "sqlite:///local.db"
+  },
+  "pg_mtls": {
+    "type": "generic",
+    "connection": "postgresql+psycopg2://app@host/db?sslmode=verify-full&sslcert=/certs/client.crt&sslkey=/certs/client.key"
+  }
+}
+```
+
+### In Python (Programmatic):
+```python
+from DataEngine import GenericConnectionObject
+
+db = GenericConnectionObject(name="sqlite_db", connection="sqlite:///:memory:")
+df = db.getTable("SELECT 1 AS val")
+```
+
+---
+
 ## Direct Connection Access
 
-Both `SqlConnectionObject` and `PgConnectionObject` expose three layers of the underlying connection stack for advanced workflows:
+All relational connection objects (`SqlConnectionObject`, `PgConnectionObject`, `MysqlConnectionObject`, `OracleConnectionObject`, `GenericConnectionObject`) inherit from `BaseRdbmsConnectionObject` and expose three layers of the underlying connection stack for advanced workflows:
 
 | Attribute | Type | Use it for |
 | :--- | :--- | :--- |
-| `.connection` | `str` | The driver-compatible connection string (pyodbc for SQL Server, psycopg2 for PostgreSQL). Hand it to any library that takes a DSN, or to your own `create_engine()`. |
+| `.connection` | `str` | The driver-compatible connection string (pyodbc, psycopg2, pymysql, oracledb). Hand it to any library that takes a DSN, or to your own `create_engine()`. |
 | `.engine` | `sqlalchemy.engine.Engine` | The `create_engine()` object. **This is what pandas wants** — pass it to `pd.read_sql()` / `DataFrame.to_sql()`. Also the route to a raw DB-API connection. |
 | `.session` | `sqlalchemy.orm.scoping.scoped_session` | The SQLAlchemy **ORM** layer — mapped classes, `session.query()`, unit-of-work transactions. Thread-local. |
 
@@ -237,10 +324,12 @@ Both `SqlConnectionObject` and `PgConnectionObject` expose three layers of the u
 
 The string differs by backend:
 
-| Backend | Shape of `.connection` |
-| :--- | :--- |
-| SQL Server | `mssql+pyodbc:///?odbc_connect=<url-encoded ODBC string>` |
-| PostgreSQL | `postgresql+psycopg2://<user>:<pw>@<server>/<database>` |
+| Backend | Driver | Shape of `.connection` |
+| :--- | :--- | :--- |
+| SQL Server | `pyodbc` | `mssql+pyodbc:///?odbc_connect=<url-encoded ODBC string>` |
+| PostgreSQL | `psycopg2-binary` | `postgresql+psycopg2://<user>:<pw>@<server>/<database>` |
+| MySQL / MariaDB | `pymysql` | `mysql+pymysql://<user>:<pw>@<server>:<port>/<database>?charset=utf8mb4` |
+| Oracle | `oracledb` (Thin) | `oracle+oracledb://<user>:<pw>@<server>:<port>/?service_name=<service_name>` |
 
 ### Example
 
@@ -388,7 +477,29 @@ DataEngine.connectionGenerator({
 })
 ```
 
-Omitting one of the three required keys raises `KeyError`. A `type` outside `"mssql"`, `"postgres"`, and `"mongo"` raises `ValueError` naming both the offending type and the connection it came from.
+Omitting one of the three required keys raises `KeyError`. A `type` outside `"mssql"`, `"postgres"`, `"mysql"`, `"mariadb"`, `"oracle"`, `"mongo"`, and `"generic"` raises `ValueError` naming both the offending type and the connection it came from.
+
+---
+
+## What's New in v2.5.0
+
+* **Universal RDBMS Abstraction (`BaseRdbmsConnectionObject`):**
+  * All relational databases now share a single base class providing unified `.connection` (DSN URI), `.engine` (SQLAlchemy Engine), and `.session` (scoped session) attributes.
+  * Standardized helper methods across all SQL backends: `query()`, `execute()`, `queryStream()`, `getTable()` (pandas DataFrame), `chunkTable()`, `truncateTable()`, and `executeProcedure()`.
+* **Generic Connection Escape Hatch (`GenericConnectionObject` / `type="generic"`):**
+  * Connect to any database (Snowflake, SQLite, DuckDB, ClickHouse) or use arbitrary connection strings (custom SSL certificates, Kerberos options, query flags) with the full DataEngine DataFrame and session interface.
+* **Ambient & Passwordless Auth (`trusted="yes"` / empty `PW`):**
+  * Standardized passwordless connection rules across all engines: SQL Server Windows Auth, PostgreSQL GSSAPI/Kerberos & peer auth, MySQL Windows native auth, and Oracle Wallet / OS external authentication (`/@`).
+* **Cross-Platform Ubuntu / Linux Fix (`psycopg2-binary`):**
+  * Replaced `psycopg2` source dependency with `psycopg2-binary>=2.9.9,<3.0.0`, eliminating `pg_config` and `libpq-dev` compilation errors on Ubuntu and Docker environments.
+* **MySQL & MariaDB Support (`MysqlConnectionObject`):**
+  * Native connection support via pure-Python `pymysql` (`type="mysql"` or `type="mariadb"`).
+* **Oracle Database Support (`OracleConnectionObject`):**
+  * Native connection support via `python-oracledb` in Thin mode (`type="oracle"`), connecting without requiring Oracle Instant Client binaries.
+* **Enhanced Password Security & Safe Reference Modes:**
+  * **Response / Password File:** Point to a 1-line file with `"PW": "file:<path>"`. Protect the file with strict OS filesystem permissions (`chmod 600`).
+  * **Runtime Environment Variable:** Reference runtime secrets with `"PW": "${VAR_NAME}"`.
+  * **Connect-Time Terminal Prompt:** Enter `"PW": "prompt"` to prompt interactively via masked terminal input (`getpass`) without saving credentials to disk.
 
 ---
 
